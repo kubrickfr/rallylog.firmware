@@ -1,0 +1,24 @@
+20120802 v1.6 - <seaton@strobotics.com.au>
+      - FIXED: [issue 24] intermittant result file corruption due to SD library using hardware SPI and LCD Library using software SPI
+
+20120309 v1.5 - <seaton@strobotics.com.au>
+      - moved SD routines into single function and re-inits before each write 
+      - TODO: [issue 24] SDLIb is setting SPI registers and stuffing up LCD so LCD routines to to reinit on use
+
+20111008 v1.4 - <seaton@strobotics.com.au>
+      - updated 3rd party libraries
+
+20110213 v1.3 - <seaton@gateway.net.au>
+      - added field headers to CSV file
+  
+20110208 v1.2 - <seaton@gateway.net.au>
+     - swapped order of time and RFID fields in CSV
+       as it makes things easier to do excel lookups
+     - Now displays time in idle mode.
+
+20110204 v1.1 - <seaton@gateway.net.au>
+     -removed quotes from CSV number values
+     -logfile names now reflect station id
+
+20110131 v1.0 - <seaton@gateway.net.au> 
+     Initial Release 
