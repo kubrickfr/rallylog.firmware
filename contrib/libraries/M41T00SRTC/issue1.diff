@@ -1,0 +1,39 @@
+--- C:/Users/SEATON~1.DAR/AppData/Local/Temp/i2c_rtc_m41t00s.cpp-revBASE.svn000.tmp.cpp	Mon Oct 10 14:05:28 2011
++++ C:/Users/seaton.DARD/Documents/Arduino/libraries/M41T00SRTC/i2c_rtc_m41t00s.cpp	Sun Nov 21 12:56:10 2010
+@@ -72,10 +72,10 @@
+         _rtc_bcd[i] = Wire.receive();
+       }
+       
+-      time.sec = bcd2dec(_rtc_bcd[_ku8Sec] & ~bit(_ku8Bit_ST));
+-      time.min = bcd2dec(_rtc_bcd[_ku8Min] & ~bit(_ku8Bit_OF));
+-      time.hour = bcd2dec(_rtc_bcd[_ku8Hour] &
+-        ~(bit(_ku8Bit_CEB) | bit(_ku8Bit_CB)));
++      time.sec = bcd2dec(_rtc_bcd[_ku8Sec] & 0x7f);		
++      time.min = bcd2dec(_rtc_bcd[_ku8Min] & 0x7f);		
++      time.hour = bcd2dec(_rtc_bcd[_ku8Hour] & 0x3f);
++        
+       time.dow = bcd2dec(_rtc_bcd[_ku8DOW]);
+       time.day = bcd2dec(_rtc_bcd[_ku8Day]);
+       time.month = bcd2dec(_rtc_bcd[_ku8Month]);
+@@ -234,7 +234,9 @@
+ */
+ uint8_t i2c_rtc_m41t00s::bcd2dec(uint8_t u8BcdValue)
+ {
+-  return (u8BcdValue & 0xF) + ((u8BcdValue & 0xF0) >> 4) * 10;
++  //return (u8BcdValue & 0xF) + ((u8BcdValue & 0xF0) >> 4) * 10;
++  return ( (u8BcdValue/16*10) + (u8BcdValue%16) );
++
+ }
+ 
+ 
+@@ -246,7 +248,9 @@
+ */
+ uint8_t i2c_rtc_m41t00s::dec2bcd(uint8_t u8ByteValue)
+ {
+-  return (u8ByteValue % 10) + ((u8ByteValue / 10) << 4);
++  //return (u8ByteValue % 10) + ((u8ByteValue / 10) << 4);
++  return ( (u8ByteValue/10*16) + (u8ByteValue%10) );
++
+ }
+ 
+ 
