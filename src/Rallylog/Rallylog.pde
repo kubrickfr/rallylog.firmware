@@ -4,7 +4,7 @@
  *
  *  http://code.google.com/p/rallylog
  *
- *  (c)2011 Stephen Eaton <seaton@strobotics.com.au>
+ *  (c)2011-2012 Stephen Eaton <seaton@strobotics.com.au>
  *
  * ---------------------------------------------------------
  */
@@ -22,8 +22,10 @@
 #include <avr/wdt.h>
 #include <avr/power.h>
 #include <Battery.h>
+#include <ModbusSlave.h>
 
-#define VERSION             "1.6"    // firmware version number
+
+#define VERSION             "1.7"    // firmware version number
 
 // Valid States
 #define STATE_STARTUP       0x00
