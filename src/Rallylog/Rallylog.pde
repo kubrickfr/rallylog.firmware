@@ -25,6 +25,7 @@
 #include <ModbusSlave.h>
 
 
+
 #define VERSION             "1.7"    // firmware version number
 
 // Valid States
@@ -85,14 +86,51 @@
 #define MB_BAUD             9600      // Baud rate of master
 #define MB_PARITY           'n'       // Parity of master
 #define MB_TXENPIN          0         // Pin to enable medium sharing TX e.g. RS485
+
+// Modbus Status Flags
+#define MB_STATUS_BATTERYLOW    0x0001  
+#define MB_STATUS_RFIDON        0x0002
+#define MB_STATUS_LCDON         0x0004
+#define MB_STATUS_RTCSTOPPED    0x0008
+#define MB_STATUS_RTCFAILED     0x000F
+
  
 
-/* slave registers (16bit) */
+// Modbus slave registers (16bit)
 enum {        
-        MB_REG0,        // RO - Device Status
+        MB_STATUS,        // RO - Device Status
         MB_BATT,        // RO - Battery Voltage
-        MB_ID,          // RW - Device ID
-        MB_REGS	 	// 
+        MB_RFID0,       // RO - RFID 10 Byte string
+        MB_RFID1,
+        MB_RFID2,
+        MB_RFID3,
+        MB_RFID4,
+        MB_RO7,        // RO - Reserved
+        MB_RO8,        // RO - Reserved
+        MB_RO9,        // RO - Reserved
+        MB_RO10,       // RO - Reserved
+        MB_RO11,       // RO - Reserved
+        MB_RO12,       // RO - Reserved
+        MB_RO13,       // RO - Reserved
+        MB_RO14,       // RO - Reserved
+        MB_RO15,       // RO - Reserved
+        // R/W registers
+        MB_ID,         // RW - Device ID
+        MB_RFIDCTL,    // RW - RFID Control
+        MB_RW2,        // RW - Reserved
+        MB_RW3,        // RW - Reserved
+        MB_RW4,        // RW - Reserved
+        MB_RW5,        // RW - Reserved
+        MB_RW6,        // RW - Reserved
+        MB_RW7,        // RW - Reserved
+        MB_RW8,        // RW - Reserved
+        MB_RW9,        // RW - Reserved
+        MB_RW10,       // RW - Reserved
+        MB_RW11,       // RW - Reserved
+        MB_RW12,       // RW - Reserved
+        MB_RW13,       // RW - Reserved
+        MB_RW14,       // RW - Reserved
+        MB_REGS	       // RW - Reserved
 };
 
 
@@ -117,7 +155,7 @@ EEMEM struct __eeprom_data initial_data EEMEM = {
 
 // Global Variables
 int STATE = STATE_STARTUP;            
-char stationAddress[3];                 //default factory default node settings i.e. unconfigured
+char stationAddress[3];                 // default factory default node settings i.e. unconfigured
 char dateString[50];                    // string to store current time/date
 static long start_time;                 // time first character is received
 boolean flgInsertMessage=false;         // flag to indicate if Insert Card Message is displayed   
@@ -164,30 +202,32 @@ ModbusSlave mbs;                      // modbus system
 void setup() {
 
   STATE = STATE_STARTING;
+  regs[MB_STATUS] = 0;                        // initialiase Modbus status status
 
   long magic;   
   eeprom_read(magic, magic);   
-  if(magic != magic_number)         // check for EEProm corruption
+  if(magic != magic_number)                   // check for EEProm corruption
     initialise_eeprom();  
-  eeprom_read(stationAddress, ID);  // get Station Address from NVM
+  eeprom_read(stationAddress, ID);            // get Station Address from NVM
+  memcpy(&regs[MB_ID], stationAddress, 2);     // Update modbus register with ID
 
 
   //LEDS
   pinMode(nLED_RED,OUTPUT);
-  digitalWrite(nLED_RED,HIGH);       //off
+  digitalWrite(nLED_RED,HIGH);                //off
   pinMode(nLED_GREEN,OUTPUT);
-  digitalWrite(nLED_GREEN,HIGH);     //off
+  digitalWrite(nLED_GREEN,HIGH);              //off
 
   //RFID
   pinMode(RFID_EN, OUTPUT);
-  digitalWrite(RFID_EN, LOW);        //off
+  digitalWrite(RFID_EN, LOW);                //off
   clearTag(rfidTagCurrent, RFID_TAG_LENGTH);    
 
   // LCD
   pinMode(nLCD_CS,OUTPUT);
-  digitalWrite(nLCD_CS, HIGH);       //off
+  digitalWrite(nLCD_CS, HIGH);               //off
   pinMode(nSD_CS,OUTPUT);
-  digitalWrite(nSD_CS, HIGH);        //off
+  digitalWrite(nSD_CS, HIGH);                //off
 
 
   // backlight
@@ -205,6 +245,7 @@ void setup() {
   battery.setOnLowVoltageCallback(lowBatteryCallback);
   battery.update();                             // update battery reading
   battery.update();                             // update battery reading
+  regs[MB_BATT] = battery.getRawVoltage();      // update modbus holding register
 
   //sd card
   pinMode(nSD_CARD_IN, INPUT);                  // Configure Card Detect Input
@@ -261,15 +302,14 @@ void loop() {
       }//if
       else {
         if (STATE == STATE_IDLE)    // display time on the LCD when idle
-          //init_LCD();
-         
-        lcdPrintTime();
+          lcdPrintTime();
       }//else
     }//else
   } // sectimer  
 
   if(sec5Timer.check()==1){          // check 5 Second timer
-    battery.update();                // read battery voltage
+    battery.update();                          // read battery voltage
+    regs[MB_BATT] = battery.getRawVoltage();    // update modbus holding register
   }//min5Timer
 
   // check if card has been removed
@@ -278,11 +318,14 @@ void loop() {
   }
 
   DebounceButton::updateAll();      // update buttons
-
+ 
+  mbs.update(regs, MB_REGS);        // Process ModBus - 
+                                    //   This is located here as inputs need to be processed first and update the input regigsters
+                                    //   Then any output registers updated by the modbus get processed below
+                                    
 
   switch(STATE){
   case STATE_STARTED:
-    // set up the LCD type and the contrast setting for the display 
     STATE=STATE_IDLE;
     break;
 
@@ -321,7 +364,7 @@ void loop() {
     // check that the SD card has been inserted
     if (digitalRead(nSD_CARD_IN) != CARD_OUT)
     {
-      lcd.reset();
+      lcd.clear();
       lcd.print("Stn:");
       lcd.print(stationAddress);
       lcd.setCursor(1,1);
@@ -333,7 +376,6 @@ void loop() {
     {
       // check to see if we need to redisplay the "insert card" message
       if(!(flgInsertMessage)){
-        lcd.reset();
         lcd.clear();
         lcd.print("Stn:");
         lcd.print(stationAddress);
@@ -346,19 +388,17 @@ void loop() {
 
   case STATE_SDINSERTED:
     delay(500);
-    resetFunc();    // soft reset
+    resetFunc();                            // soft reset
     break;
 
   case STATE_BATLOW:
     // check to see if we need to redisplay the "insert card" message
-    digitalWrite(RFID_EN, LOW);  // turn off
+    digitalWrite(RFID_EN, LOW);            // turn off
     digitalWrite(nLED_RED,HIGH);
-    digitalWrite(nLCD_BL,HIGH);  // LCD Backlight Off
+    digitalWrite(nLCD_BL,HIGH);            // LCD Backlight Off
 
     if(!(flgInsertMessage)){
-     //init_LCD();
-      lcd.reset();
-      lcd.clear();                 // display message on LCD
+      lcd.clear();                         // display message on LCD
       lcd.print("Stn:");
       lcd.print(stationAddress);
       lcd.setCursor(2,1);
@@ -392,7 +432,8 @@ void initialise_eeprom() {
  *   This is called each time a low battery condition is detected  
  */ 
 void lowBatteryCallback(){   
-    STATE=STATE_BATLOW; 
+    STATE=STATE_BATLOW;
+    regs[MB_STATUS] |= MB_STATUS_BATTERYLOW;    // update modbus status register  
 }
 
 /*******************************************************************************/
@@ -425,7 +466,6 @@ void onMiddleHold(DebounceButton* btn){
 
   // only sleep if not low battery
   if(STATE != STATE_BATLOW){
-    lcd.reset();
     lcd.clear();
     lcd.print("Stn:");
     lcd.print(stationAddress);
@@ -450,8 +490,7 @@ void onMiddleHold(DebounceButton* btn){
     delay(100);
 
     lcd.display();              // LCD On
-    //init_LCD();
-    lcd.reset();
+
     lcd.clear();
 
     lcd.print("Stn:");
@@ -472,12 +511,11 @@ void updateCurrentRfidTag(byte *tagNew)
 {  
   
   // only print changed value     
-  if(!equals(tagNew, rfidTagCurrent))        // checks against previous tag
+  if(!equals(tagNew, rfidTagCurrent))                           // checks against previous tag
   {
-    saveTag(tagNew, rfidTagCurrent);         // is different so display and save to file
+    saveTag(tagNew, rfidTagCurrent);                           // is different so display and save to file
 
     byte i = 0;
-    lcd.reset();
     lcd.clear(); 
     lcd.print("Stn:");
     lcd.print(stationAddress);
@@ -485,9 +523,9 @@ void updateCurrentRfidTag(byte *tagNew)
     lcd.print("ID:");
     // STX
     //lcd.print(0x02, BYTE);
-    lcdPrintTime();            // display time on LCD
+    lcdPrintTime();                                            // display time on LCD
 
-    if(writeCsvRecord()<0) // Write CSV Record to SD Card
+    if(writeCsvRecord()<0)                                     // Write CSV Record to SD Card
       {
        lcd.begin(DOG_LCD_M162,0x28, DOG_LCD_VCC_3V3);          // error
        lcd.print("SD Error");
@@ -840,13 +878,13 @@ void rfidOn(){
   digitalWrite(RFID_EN, HIGH);  // turn on
   digitalWrite(nLED_RED,LOW);
   digitalWrite(nLCD_BL,LOW);    //LCD Backlight On
-  lcd.reset();
   lcd.clear();
   lcd.print("Stn:");
   lcd.print(stationAddress);
   lcd.setCursor(0,1);
   lcd.print("Swipe Next Card.");
   STATE=STATE_RFIDON;
+  regs[MB_STATUS] |= MB_STATUS_RFIDON;    // update modbus status register
 }
 
 /*******************************************************************************/
@@ -855,13 +893,13 @@ void rfidOff(){
   digitalWrite(RFID_EN, LOW);   // turn off
   digitalWrite(nLED_RED,HIGH);
   digitalWrite(nLCD_BL,HIGH);   // LCD Backlight Off
-  lcd.reset();
   lcd.clear();
   lcd.print("Stn:");
   lcd.print(stationAddress);
   lcd.setCursor(5,1);
   lcd.print("Ready");
   STATE=STATE_IDLE;
+  regs[MB_STATUS] &= ~MB_STATUS_RFIDON;    // update modbus status register
 }
 
 
