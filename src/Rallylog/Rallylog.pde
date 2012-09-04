@@ -26,7 +26,7 @@
 
 
 
-#define VERSION             "1.7"    // firmware version number
+#define VERSION             "2.0"    // firmware version number
 
 
 #define RESET_ENABLED       0
@@ -257,7 +257,7 @@ void setup() {
   rtc.begin();                                  // begin rtc interface
 
   // battery monitor
-  battery.setOnLowVoltageCallback(lowBatteryCallback);
+  //battery.setOnLowVoltageCallback(lowBatteryCallback);
   battery.update();                             // update battery reading
   battery.update();                             // update battery reading
   regs[MB_BATT] = battery.getRawVoltage();      // update modbus holding register
@@ -438,7 +438,7 @@ void loop() {
     case STATE_BATOK:
       regs[MB_STATUS] &= ~MB_STATUS_BATTERYLOW;    // update modbus status register
       STATE = STATE_IDLE;
-    break
+    break;
   } //switch
 
 } //loop
