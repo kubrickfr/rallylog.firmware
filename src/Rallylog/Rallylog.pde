@@ -21,28 +21,14 @@
 #include <avr/sleep.h>
 #include <avr/wdt.h>
 #include <avr/power.h>
-#include <Battery.h>
+#include "Battery.h"
 #include <ModbusSlave.h>
 
 
 
 #define VERSION             "1.7"    // firmware version number
 
-// Valid States
-#define STATE_STARTUP       0x00
-#define STATE_STARTING      0x01
-#define STATE_STARTED       0x02
-#define STATE_IDLE          0x03
-#define STATE_SLEEPING      0x04
-#define STATE_SDREMOVED     0x05
-#define STATE_SDINSERTED    0x06
-#define STATE_SDINIT        0x11
-#define STATE_SDERROR       0x1F
-#define STATE_RFIDON        0x07
-#define STATE_SAVING        0x08
-#define STATE_BATLOW        0x09
 
-// settings
 #define RESET_ENABLED       0
 #define RESET_TIME          1000
 #define RFID_REMOVED_TIME   1500
@@ -93,20 +79,19 @@
 #define MB_STATUS_LCDON         0x0004
 #define MB_STATUS_RTCSTOPPED    0x0008
 #define MB_STATUS_RTCFAILED     0x000F
-
- 
+#define MB_STATUS_SDINSERTED    0x0010
 
 // Modbus slave registers (16bit)
 enum {        
-        MB_STATUS,        // RO - Device Status
-        MB_BATT,        // RO - Battery Voltage
-        MB_RFID0,       // RO - RFID 10 Byte string
-        MB_RFID1,
-        MB_RFID2,
-        MB_RFID3,
-        MB_RFID4,
-        MB_RO7,        // RO - Reserved
-        MB_RO8,        // RO - Reserved
+        MB_STATUS,     // RO - Device Status
+        MB_BATT,       // RO - Raw Battery Voltage
+        MB_RFID0,      // RO - [TAGByte1 | TAGByte0] 
+        MB_RFID1,      // RO - [TAGByte3 | TAGByte2]
+        MB_RFID2,      // RO - [ 0       | TAGByte4] 
+        MB_RTCCALYY,   // RO - [RTCCALIB | RTCYEAR ]   
+        MB_RTCMMDD,    // RO - [RTCMONTH | RTCDAY  ]
+        MB_RTCMMHH,    // RO - [RTCMIN   | RTCHOUR ]
+        MB_RTCSS,      // RO - [ 0       | RTCSEC  ]
         MB_RO9,        // RO - Reserved
         MB_RO10,       // RO - Reserved
         MB_RO11,       // RO - Reserved
@@ -133,6 +118,23 @@ enum {
         MB_REGS	       // RW - Reserved
 };
 
+// Valid DeviceStates
+enum DeviceState {
+   STATE_STARTUP,
+   STATE_STARTING,    
+   STATE_STARTED,
+   STATE_IDLE,
+   STATE_SLEEPING,
+   STATE_SDREMOVED,
+   STATE_SDINSERTED,
+   STATE_SDINIT,
+   STATE_SDERROR,
+   STATE_RFIDON,
+   STATE_RFIDOFF,
+   STATE_SAVING,
+   STATE_BATLOW,
+   STATE_BATOK
+};
 
 
 
@@ -154,7 +156,7 @@ EEMEM struct __eeprom_data initial_data EEMEM = {
 
 
 // Global Variables
-int STATE = STATE_STARTUP;            
+DeviceState STATE = STATE_STARTUP;            
 char stationAddress[3];                 // default factory default node settings i.e. unconfigured
 char dateString[50];                    // string to store current time/date
 static long start_time;                 // time first character is received
@@ -189,15 +191,28 @@ void error_P(const char* str) {
 
 // Global timers
 Metro secTimer = Metro(1000);             // 1 Second timer
-Metro sec5Timer = Metro(5000) ;          //  5 Second timer
+Metro sec5Timer = Metro(5000) ;           //  5 Second timer
 
 // Define Peripheral subsystems 
 NewSoftSerial rfidSerial =  NewSoftSerial(RFID_RX, nLED_RED);  // RFID SERIAL IN - TX is not used but a pin is required so using a LED PIN as Dummy TX (not used at all)
-DogLcd lcd(SPI_MOSI, SPI_SCK, LCD_RS, nLCD_CS );   // LCD 
+DogLcd lcd(SPI_MOSI, SPI_SCK, LCD_RS, nLCD_CS );               // LCD 
 DebounceButton buttonMiddle = DebounceButton(nBTN_MIDDLE, DBTN_PULLUP_INTERNAL, 50, 2000, 0); // Debounce setting for button
-i2c_rtc_m41t00s rtc;                            // define RTC
-Battery battery(ADC_BAT_MON, BAT_MON_EN, BAT_LOW_VOLTAGE);  // low battery of 6.00v
-ModbusSlave mbs;                      // modbus system
+i2c_rtc_m41t00s rtc;                                          // define RTC
+Battery battery(ADC_BAT_MON, BAT_MON_EN, BAT_LOW_VOLTAGE, onBatteryStatusChange);    // low battery of 6.00v
+ModbusSlave mbs;                                              // modbus system
+
+
+// Function Declarations
+
+void rfidToModbus(int* modReg, byte* tag, byte len);       // saves RFID TAG (5 Bytes) to 3 modbus registers
+void rtcToModbus(int* modReg);                             // saves RTC Time/Date to Modbus Registers
+void lcdOn();                                              // turns on LCD Backlight
+void lcdOff();                                             // turns off LCD Backlight
+void rfidOn();
+void rfidOff();
+void onBatteryStateChange(eBatteryStatus status);            // battery callback 
+
+// Start of Implementation
 
 void setup() {
 
@@ -220,7 +235,7 @@ void setup() {
 
   //RFID
   pinMode(RFID_EN, OUTPUT);
-  digitalWrite(RFID_EN, LOW);                //off
+  digitalWrite(RFID_EN, LOW);                 //off
   clearTag(rfidTagCurrent, RFID_TAG_LENGTH);    
 
   // LCD
@@ -232,7 +247,7 @@ void setup() {
 
   // backlight
   pinMode(nLCD_BL,OUTPUT);                      // setup LCD Backlight
-  digitalWrite(nLCD_BL,HIGH);                   //OFF
+  digitalWrite(nLCD_BL, HIGH);                   //OFF
 
   // buttons
   buttonMiddle.onClick = onMiddleClick;         // function when middle button clicked
@@ -276,6 +291,7 @@ void setup() {
 
   else {
     STATE = STATE_SDREMOVED;
+    regs[MB_STATUS] &= ~MB_STATUS_SDINSERTED;    // update modbus
   }
 
   rfidSerial.begin(9600);           // software serial for RFID RX
@@ -301,15 +317,17 @@ void loop() {
         rtc.clearFault();
       }//if
       else {
-        if (STATE == STATE_IDLE)    // display time on the LCD when idle
+        if (STATE == STATE_IDLE){    // display time on the LCD when idle
           lcdPrintTime();
+          rtcToModbus(regs);        // update modbus registers
+        }
       }//else
     }//else
   } // sectimer  
 
   if(sec5Timer.check()==1){          // check 5 Second timer
     battery.update();                          // read battery voltage
-    regs[MB_BATT] = battery.getRawVoltage();    // update modbus holding register
+    regs[MB_BATT] = battery.getVoltage();   // update modbus holding register
   }//min5Timer
 
   // check if card has been removed
@@ -320,7 +338,7 @@ void loop() {
   DebounceButton::updateAll();      // update buttons
  
   mbs.update(regs, MB_REGS);        // Process ModBus - 
-                                    //   This is located here as inputs need to be processed first and update the input regigsters
+                                    //   This is located here as inputs need to be processed first and update the input registers
                                     //   Then any output registers updated by the modbus get processed below
                                     
 
@@ -331,8 +349,14 @@ void loop() {
 
   case STATE_IDLE:
     break;
+    
+  case STATE_RFIDOFF:
+     regs[MB_STATUS] &= ~MB_STATUS_RFIDON;   // update modbus status register
+     STATE = STATE_IDLE;
+  break;
 
   case STATE_RFIDON:                         // Read RFID Tag
+    regs[MB_STATUS] |= MB_STATUS_RFIDON;     // update modbus status register
     action = rfidSerial.read();
     clearTag(rfidTagTemp, 6);
 
@@ -357,6 +381,7 @@ void loop() {
     break;
 
   case STATE_SDREMOVED:
+    regs[MB_STATUS] &= ~MB_STATUS_SDINSERTED;    // update modbus
     digitalWrite(RFID_EN, LOW);            // turn off
     digitalWrite(nLED_RED,HIGH);
     digitalWrite(nLCD_BL,HIGH);            // LCD Backlight Off
@@ -370,7 +395,7 @@ void loop() {
       lcd.setCursor(1,1);
       lcd.print("Card Inserted..");
       flgInsertMessage=false;
-       STATE = STATE_SDINSERTED;
+      STATE = STATE_SDINSERTED;
     } 
     else 
     {
@@ -387,11 +412,14 @@ void loop() {
     break;
 
   case STATE_SDINSERTED:
+    regs[MB_STATUS] |= MB_STATUS_SDINSERTED;    // update modbus
     delay(500);
     resetFunc();                            // soft reset
     break;
 
   case STATE_BATLOW:
+    regs[MB_STATUS] |= MB_STATUS_BATTERYLOW;    // update modbus status register  
+
     // check to see if we need to redisplay the "insert card" message
     digitalWrite(RFID_EN, LOW);            // turn off
     digitalWrite(nLED_RED,HIGH);
@@ -406,6 +434,11 @@ void loop() {
       flgInsertMessage=true;
     }
     break;
+    
+    case STATE_BATOK:
+      regs[MB_STATUS] &= ~MB_STATUS_BATTERYLOW;    // update modbus status register
+      STATE = STATE_IDLE;
+    break
   } //switch
 
 } //loop
@@ -425,16 +458,6 @@ void initialise_eeprom() {
   eeprom_write(magic_number, magic); 
 } 
 
-
-/*******************************************************************************/ 
-/**  
- * lowBatteryCallback    
- *   This is called each time a low battery condition is detected  
- */ 
-void lowBatteryCallback(){   
-    STATE=STATE_BATLOW;
-    regs[MB_STATUS] |= MB_STATUS_BATTERYLOW;    // update modbus status register  
-}
 
 /*******************************************************************************/
 /**
@@ -530,6 +553,8 @@ void updateCurrentRfidTag(byte *tagNew)
        lcd.begin(DOG_LCD_M162,0x28, DOG_LCD_VCC_3V3);          // error
        lcd.print("SD Error");
       }
+      
+    rfidToModbus(regs, tagNew, RFID_TAG_LENGTH);              // update Modbus registers 
   } //if
 
 }
@@ -875,36 +900,87 @@ void sleepNow(){
 /*******************************************************************************/
 // Turns on the RFID Module
 void rfidOn(){
-  digitalWrite(RFID_EN, HIGH);  // turn on
+  digitalWrite(RFID_EN, HIGH);                        // turn on
   digitalWrite(nLED_RED,LOW);
-  digitalWrite(nLCD_BL,LOW);    //LCD Backlight On
+  lcdOn();                                            // Turn On Backlight
   lcd.clear();
   lcd.print("Stn:");
   lcd.print(stationAddress);
   lcd.setCursor(0,1);
   lcd.print("Swipe Next Card.");
   STATE=STATE_RFIDON;
-  regs[MB_STATUS] |= MB_STATUS_RFIDON;    // update modbus status register
 }
 
 /*******************************************************************************/
 // Turns off the RFID Module
 void rfidOff(){
-  digitalWrite(RFID_EN, LOW);   // turn off
+  digitalWrite(RFID_EN, LOW);                         // turn off
   digitalWrite(nLED_RED,HIGH);
-  digitalWrite(nLCD_BL,HIGH);   // LCD Backlight Off
+  lcdOff();                                          // turn off backlight
   lcd.clear();
   lcd.print("Stn:");
   lcd.print(stationAddress);
   lcd.setCursor(5,1);
   lcd.print("Ready");
-  STATE=STATE_IDLE;
-  regs[MB_STATUS] &= ~MB_STATUS_RFIDON;    // update modbus status register
+  STATE=STATE_RFIDOFF;
+}
+
+/*******************************************************************************/
+// Updates Modbus Register With RFID
+//    this converts an array of 5 bytes to an array of 3 words
+//    | BYTE2 | BYTE1 |
+//    | BYTE4 | BYTE3 |
+//    | 0     | BYTE5 |
+void rfidToModbus(int* modReg, byte* tag, byte len){
+  
+  for (byte i=0; i < len ; i += 2)                      // RFID TAG ID
+  {
+    if ((len - i) > 1)                                  // check for odd byte
+      modReg[MB_RFID0 + i/2] = word(tag[i+1], tag[i]);  // update modbus register at RFID Offset
+    else
+      modReg[MB_RFID0 + i/2] = word(0, tag[i]);         // write the last odd byte
+  }
+  
 }
 
 
+/*******************************************************************************/
+// Updates Modbus Register With RTC Time/Date
+//    this convers an array of 5 bytes to an arry of 3 words
+//    | CAL | YY |
+//    | MM  | DD |
+//    | MM  | HH |
+//    | 0   | SS |
+void rtcToModbus(int* modReg){
+  modReg[MB_RTCCALYY] =  word(rtc.time.cal,   rtc.time.year);
+  modReg[MB_RTCMMDD]  =  word(rtc.time.month, rtc.time.day);
+  modReg[MB_RTCMMHH]  =  word (rtc.time.min,  rtc.time.hour);
+  modReg[MB_RTCSS]    =  word (rtc.time.sec);
+}
 
+/*****************************************************************************/
+// Turns LCD Backlight on
+void lcdOn(){
+    digitalWrite(nLCD_BL,LOW);                          //LCD Backlight On
+    regs[MB_STATUS] |= MB_STATUS_LCDON;                 // update modbus status register
+}
 
+/*****************************************************************************/
+// Turns LCD Backlight off
+void lcdOff(){
+   digitalWrite(nLCD_BL,HIGH);                         // LCD Backlight Off
+   regs[MB_STATUS] &= ~MB_STATUS_LCDON;                // update modbus status register
+}
+
+/*****************************************************************************/
+// Battery OnStatusChangeCallback
+//  this function gets called if the state of the battery changes
+void onBatteryStatusChange(eBatteryStatus status){
+  if (status == BATTERY_STATUS_NORMAL)
+    STATE = STATE_BATOK;
+  else
+    STATE = STATE_BATLOW;
+}
 
 
 
