@@ -1,0 +1,83 @@
+FirmataLite is a simplified version of Firmata by Hans-Christoph Steiner. Everything but the ability to send and receive Strings and Sysex messages has been stripped out.
+
+This library is to be used as a serial protocol rather than a standalone sketch. The idea is to define interfaces for various components and sensors such as button, accelerometer, etc on both the SW app (running on PC/laptop) and Arduino and to pass the data in a SysEx packet (see SysEx proposal: http://firmata.org/wiki/Proposals#SysEx).
+
+For example, it's better to debounce a button on the arduino side rather than the PC. So in arduino, you could create a Button base object that includes actions such as press, release, etc. Read the button, then send the state to the PC app upon change.
+
+What follows are a couple of examples of how and why you'd want to use FirmataLite i this way, although I have yet to produce any concrete examples. All just theory at this point.
+
+// constants in imaginary ButtonBase class
+// class identifier 
+BUTTON 0x01 // (value between 0x00 and 0x69)
+// states
+PRESSED 0x00
+RELEASED 0x01
+
+// properties
+int action
+É
+
+data[2];
+data[0] = buttonInstanceID
+data[1] = PRESSED; // action
+
+// send the data to the SW application
+// params: class identifier, number of bytes to send, array
+FirmataLite.sendSysex(BUTTON, 2, data);
+
+In the SW application, create a ButtonBase class that implements the same interface.
+
+As a more complex example, consider an accelerometer. There are analog versions, several I2C and SPI versions. Simply define an accelerometer interface and implement it both on the Arduino and your SW application, and use FirmataLite to send the data. This way you can worry about the exact implementation of the accelerometer on the Arduino side. Your SW application simply needs to know an accelerometer is being used, without the specifics of the particular accelerometer.
+
+// imaginary AccelerometerBase class
+// class identifier
+ACCELEROMTER 0x08
+
+// properties
+x, y, z
+gRange // range of the sensor in units of gravity (eg 2g, 2.5g, 4g)
+
+// methods
+// to be implemented in the sysexCallback function in your Arduino sketch
+// these are used to start and stop reading the sensor from the SW app
+start()
+stop()
+
+// assuming an "accelerometer" as an Arduino library instance for an accelerometer
+É
+
+x = accelerometer.x
+y = accelerometer.y
+z = accelerometer.z
+gRange = accelerometer.range
+
+data[5]
+data[0] = accelerometerInstanceID
+data[1] = x
+data[2] = y
+data[3] = z
+data[4] = gRange
+
+// send the packet
+FirmataLite.sendSysex(ACCELEROMETER, 5, data);
+
+the SW implementation then expects an accelerometer packet and can appropriately parse the values.
+
+// imaginary SW application running on laptop connected to Arduino
+
+switch (incomingDataPacket[0]) {
+ case HW.ACCELEROMETER:
+	// parse accelerometer data
+	if (incomingDataPacket[1] = instance1) {
+		accelInstance1.x = incomingDataPacket[2]
+		accelInstance1.y = incomingDataPacket[3]
+		accelInstance1.z = incomingDataPacket[4]
+		accelInstance1.gRange = incomingDataPacket[5]
+	} else if (incomingDataPacket[1] = instance2) {
+		// assign values
+	}	
+	break
+ case HW.COMPONENT:
+	// some other component or sensor data (if you have any to implement)
+	break
+}

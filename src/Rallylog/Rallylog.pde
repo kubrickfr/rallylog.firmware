@@ -21,7 +21,7 @@
 #include <avr/sleep.h>
 #include <avr/wdt.h>
 #include <avr/power.h>
-#include <Battery.h>
+#include "Battery.h"
 
 #define VERSION             "1.6"    // firmware version number
 
