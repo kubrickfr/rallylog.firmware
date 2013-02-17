@@ -97,9 +97,8 @@
 
 #define EE_ADDR_system_station_id                    0x10 // BYTE
 
-
-
 #define MIN(x,y) ( x > y ? y : x ) 
+#define byteToint(x) ((int) x & 0xff)
 
 
 // Global Variables
@@ -109,7 +108,7 @@ static long start_time;                 // time first character is received
 boolean flgInsertMessage=false;         // flag to indicate if Insert Card Message is displayed
 
 // System config in ram
-byte      system_station_id;            // station ID
+char      system_station_id;            // station ID
 
 // RFID
 unsigned int nowLastRfid = 0;          // millis of last seen rfid tag
@@ -153,6 +152,7 @@ void setup() {
   STATE = STATE_STARTING;
 
   config_init();                    // read in config from EEPROM
+  //system_station_id = 1;
 
   //LEDS
   pinMode(nLED_RED,OUTPUT);
@@ -192,7 +192,7 @@ void setup() {
   pinMode(nSD_CARD_IN, INPUT);      // Configure Card Detect Input
   digitalWrite(nSD_CARD_IN, HIGH);  // enable pullup;
   file.dateTimeCallback(sdDateTimeCallback);    // callback to get time/date for file timestamp
-  Serial.begin(9600);               // opens serial port, sets data rate to 9600 bps
+  //Serial.begin(9600);               // opens serial port, sets data rate to 9600 bps
 
   delay(500);
 
@@ -200,10 +200,13 @@ void setup() {
   //init_LCD();
   lcd.begin(DOG_LCD_M162,0x28, DOG_LCD_VCC_3V3);
   lcd.print("Stn:");
-  lcd.print(system_station_id);
+  lcd.print(byteToint(system_station_id));
   lcd.setCursor(1,1);
   lcd.print("Rallylog v");
   lcd.print(CODE_MAJOR_VERSION);
+  lcd.print(".");
+  lcd.print(CODE_MINOR_VERSION);
+
 
   //check state of SD card
   if (digitalRead(nSD_CARD_IN) != CARD_OUT)
@@ -311,7 +314,7 @@ void loop() {
       //init_LCD();
       lcd.reset();
       lcd.print("Stn:");
-      lcd.print(system_station_id);
+      lcd.print(byteToint(system_station_id));
       lcd.setCursor(1,1);
       lcd.print("Card Inserted..");
       flgInsertMessage=false;
@@ -325,7 +328,7 @@ void loop() {
         lcd.reset();
         lcd.clear();
         lcd.print("Stn:");
-        lcd.print(system_station_id);
+        lcd.print(byteToint(system_station_id));
         lcd.setCursor(2,1);
         lcd.print("Insert Card");
         flgInsertMessage = true;
@@ -349,7 +352,7 @@ void loop() {
       lcd.reset();
       lcd.clear();                 // display message on LCD
       lcd.print("Stn:");
-      lcd.print(system_station_id);
+      lcd.print(byteToint(system_station_id));
       lcd.setCursor(2,1);
       lcd.print("Low Battery"); 
       flgInsertMessage=true;
@@ -410,7 +413,7 @@ void onMiddleHold(DebounceButton* btn){
     lcd.reset();
     lcd.clear();
     lcd.print("Stn:");
-    lcd.print(system_station_id);
+    lcd.print(byteToint(system_station_id));
     lcd.setCursor(0,1);
     lcd.print("Powering Down..."); 
 
@@ -437,7 +440,7 @@ void onMiddleHold(DebounceButton* btn){
     lcd.clear();
 
     lcd.print("Stn:");
-    lcd.print(system_station_id);
+    lcd.print(byteToint(system_station_id));
 
     lcd.setCursor(5,1);
     lcd.print("Ready"); 
@@ -464,13 +467,13 @@ void updateCurrentRfidTag(byte *tagNew)
     //lcd.begin(DOG_LCD_M162,0x28, DOG_LCD_VCC_3V3);
     lcd.clear(); 
     lcd.print("Stn:");
-    lcd.print(system_station_id);
+    lcd.print(byteToint(system_station_id));
     lcd.setCursor(0,1);  
     lcd.print("ID:");
     // STX
     //lcd.print(0x02, BYTE);
     Serial.print("aA");            // Send Announce of received RFID TAG
-    Serial.print(system_station_id);
+    Serial.print(byteToint(system_station_id));
     Serial.print("R");
     for (i=0; i<5; i++) 
     {
@@ -652,7 +655,7 @@ int writeCsvRecord()
   root.openRoot(&volume);
 
   // create a new file
-  String fileName = 'LOGSTN' + system_station_id + '.CSV';            
+  String fileName = 'LOGSTN' + byteToint(system_station_id) + '.CSV';            
   char name[12];
   fileName.toCharArray(name,12);
  
@@ -664,7 +667,7 @@ int writeCsvRecord()
   //    file.sync();                           // Flush file record to SDFat
   uint8_t u8Status = rtc.get();        // get the current time and update time structures
   byte i = 0;
-  file.print(system_station_id);          // Station ID
+  file.print(byteToint(system_station_id));          // Station ID
   file.print(",");             
   for (i=0; i<5; i++)                  // RFID TAG ID
   {
@@ -842,7 +845,7 @@ void rfidOn(){
   lcd.reset();
   lcd.clear();
   lcd.print("Stn:");
-  lcd.print(system_station_id);
+  lcd.print(byteToint(system_station_id));
   lcd.setCursor(0,1);
   lcd.print("Swipe Next Card.");
   STATE=STATE_RFIDON;
@@ -858,7 +861,7 @@ void rfidOff(){
   lcd.reset();
   lcd.clear();
   lcd.print("Stn:");
-  lcd.print(system_station_id);
+  lcd.print(byteToint(system_station_id));
   lcd.setCursor(5,1);
   lcd.print("Ready");
   STATE=STATE_IDLE;
