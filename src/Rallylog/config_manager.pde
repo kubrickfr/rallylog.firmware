@@ -2,8 +2,6 @@
   config_manager.pde - Part of the Rallylog project
   Stephen Eaton seaton@strobotics.com.au
   
-  
-  
   Copyright (C) 2013 Stephen Eaton.  All rights reserved.
  
   This library is free software; you can redistribute it and/or

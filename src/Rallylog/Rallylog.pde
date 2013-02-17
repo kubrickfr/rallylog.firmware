@@ -9,7 +9,7 @@
  * ---------------------------------------------------------
  */
 
-#include <avr/eeprom.h> 
+#include <EEPROM.h> 
 #include <Wire.h>
 #include <i2c_rtc_m41t00s.h>
 #include <Metro.h>
@@ -22,8 +22,20 @@
 #include <avr/wdt.h>
 #include <avr/power.h>
 #include "Battery.h"
+#include "Firmatalite.h"
 
-#define VERSION             "1.6"    // firmware version number
+//
+//  Station ID
+//  Valid Values:
+//    0-127            
+#define DEFAULT_system_station_id  0
+
+#define SIGNATURE_CODE1      16      // Day
+#define SIGNATURE_CODE2      2       // month
+#define SIGNATURE_CODE3      20      // Century
+#define SIGNATURE_CODE4      13      // year of centry
+#define CODE_MAJOR_VERSION   2       // Major Version
+#define CODE_MINOR_VERSION   0       // Minor version
 
 // Valid States
 #define STATE_STARTUP       0x00
@@ -71,51 +83,39 @@
 #define nLCD_CS              16    // enable LOW lcd CS
 #define nSD_CARD_IN          17    // SD Card Detect in HIGH, out LOW
 
-// EEPROM Macros
-#define eeprom_read_to(dst_p, eeprom_field, dst_size) eeprom_read_block(dst_p, (void *)offsetof(__eeprom_data, eeprom_field), MIN(dst_size, sizeof((__eeprom_data*)0)->eeprom_field)) 
-#define eeprom_read(dst, eeprom_field) eeprom_read_to(&dst, eeprom_field, sizeof(dst)) 
-#define eeprom_write_from(src_p, eeprom_field, src_size) eeprom_write_block(src_p, (void *)offsetof(__eeprom_data, eeprom_field), MIN(src_size, sizeof((__eeprom_data*)0)->eeprom_field)) 
-#define eeprom_write(src, eeprom_field) { typeof(src) x = src; eeprom_write_from(&x, eeprom_field, sizeof(x)); } 
+
+// EEPROM size in bytes
+#define EEPROM_SIZE         0x200  
+
+// EEPROM Addresses for signature code and version of firmware
+#define EE_ADDR_SIGNATURE_CODE1                      0x00 // BYTE
+#define EE_ADDR_SIGNATURE_CODE2                      0x01 // BYTE
+#define EE_ADDR_SIGNATURE_CODE3                      0x02 // BYTE
+#define EE_ADDR_SIGNATURE_CODE4                      0x03 // BYTE
+#define EE_ADDR_CODE_MAJOR_VERSION                   0x04 // BYTE
+#define EE_ADDR_CODE_MINOR_VERSION                   0x05 // BYTE
+
+#define EE_ADDR_system_station_id                    0x10 // BYTE
+
+
+
 #define MIN(x,y) ( x > y ? y : x ) 
-
-/*
- * Change the magic number any time the EEPROM default content changes, this will invalidate any data in eeprom already there
- * cause it to be overwritten with the new version
- */
-const long magic_number = 0x5431;
-struct __eeprom_data {
-  long magic;        // magic number
-  char ID[3];        // stationID
-  char hwVersion;    // hardware version
-}; 
-
-EEMEM struct __eeprom_data initial_data EEMEM = { 
-  magic_number,   //Magic Number
-  "**",           //Factory Setting Address
-  'C'};           //HW Version
 
 
 // Global Variables
 int STATE = STATE_STARTUP;            
-char stationAddress[3];       //default factory default node settings i.e. unconfigured
-int incomingByte = 0;	      // for incoming serial data
-int announceCount = 5;
-char pkt_start, pkt_cmd;
-char pkt_addr[3];
-char pkt_data[9];
-char dateString[50];         // string to store current time/date
-static long start_time;      // time first character is received
+char dateString[50];                    // string to store current time/date
+static long start_time;                 // time first character is received
+boolean flgInsertMessage=false;         // flag to indicate if Insert Card Message is displayed
 
-// serial parsing
-int SerIn = -1;
-char CmdHandlerChar = '@'; 
-boolean flgInsertMessage=false;   // flag to indicate if Insert Card Message is displayed
+// System config in ram
+byte      system_station_id;            // station ID
 
 // RFID
-unsigned int nowLastRfid = 0;// millis of last seen rfid tag
+unsigned int nowLastRfid = 0;          // millis of last seen rfid tag
 boolean rfidTagSeen = false;
-byte rfidTagCurrent[RFID_TAG_LENGTH]; // last seen tag
-byte rfidTagTemp[6];  // temp RFID tag
+byte rfidTagCurrent[RFID_TAG_LENGTH];  // last seen tag
+byte rfidTagTemp[6];                   // temp RFID tag
 
 // SDFAT32 Library Definitions
 Sd2Card card;
@@ -152,12 +152,7 @@ void setup() {
 
   STATE = STATE_STARTING;
 
-  long magic;   
-  eeprom_read(magic, magic);   
-  if(magic != magic_number)         // check for EEProm corruption
-    initialise_eeprom();  
-  eeprom_read(stationAddress, ID);  // get Station Address from NVM
-
+  config_init();                    // read in config from EEPROM
 
   //LEDS
   pinMode(nLED_RED,OUTPUT);
@@ -205,42 +200,17 @@ void setup() {
   //init_LCD();
   lcd.begin(DOG_LCD_M162,0x28, DOG_LCD_VCC_3V3);
   lcd.print("Stn:");
-  lcd.print(stationAddress);
+  lcd.print(system_station_id);
   lcd.setCursor(1,1);
   lcd.print("Rallylog v");
-  lcd.print(VERSION);
+  lcd.print(CODE_MAJOR_VERSION);
 
-  // check Card and initialiase FAT32 filesystem
-  //  TODO: this must be performed before the LCD init routines as they both use SPI
-  //  and if LCD is init first then things don't work.
+  //check state of SD card
   if (digitalRead(nSD_CARD_IN) != CARD_OUT)
   {
     STATE = STATE_SDINSERTED;
 
-    // initialize the SD card at SPI_HALF_SPEED to avoid bus errors with
-    // breadboards.  use SPI_FULL_SPEED for better performance.
-    //    if (!card.init(SPI_FULL_SPEED)) error("card.init failed");
-
-    // initialize a FAT volume
-    //    if (!volume.init(&card)) error("volume.init failed");
-
-    // open the root directory
-    //    if (!root.openRoot(&volume)) error("openRoot failed");
-
-    // create a new file
-    //    char name[] = "LOGSTN00.CSV";
-    //    if(stationAddress[0] != '*'){        // check we are not at default address of ** as these char should not be in a DOS file nam
-
-    //      name[6] = stationAddress[0];
-    //      name[7] = stationAddress[1];
-    //    }
-    //    file.open(&root, name, O_CREAT | O_APPEND | O_WRITE);  // create a new file if not exist, else append to existing.
-
-    //field
-    //    file.print("STATIONID,RFID,TIMESTAMP,VOLTAGE");
-    //    file.println();                        // CR/LF
-    //    file.sync();                           // Flush file record to SDFat
-
+ 
     STATE=STATE_STARTED;
   }
 
@@ -250,7 +220,9 @@ void setup() {
 
   rfidSerial.begin(9600);           // software serial for RFID RX
 
-  establishContact();               // phone home
+ // Init Firmata 
+  FirmataLite.attach(START_SYSEX, sysexCallback);
+  FirmataLite.begin();
 }
 
 /*******************************************************************************/
@@ -265,22 +237,18 @@ void loop() {
 
   if(secTimer.check()==1){       // check if timer has passes its interval
     if (rtc.isStopped()) {
-      announce("RTC_STOP");
       rtc.start();
-      announce("RTCSTART");
     } //if 
     else { 
       if (rtc.isFailed()){
-        announce("RTC_FAIL");
-        rtc.clearFault();
-        announce("RTC_CLR-");
+          rtc.clearFault();
       }//if
       else {
-        announceDateTime();
         if (STATE == STATE_IDLE)    // display time on the LCD when idle
-          //init_LCD();
-         
-        lcdPrintTime();
+          lcdPrintTime();
+          if(FirmataLite.available()) FirmataLite.processInput();
+            remote_broadcast_rtc();
+        
       }//else
     }//else
   } // sectimer  
@@ -295,7 +263,9 @@ void loop() {
   }
 
   DebounceButton::updateAll();      // update buttons
-  SerialParser();                   // handle network commands
+  
+  if(FirmataLite.available()) 
+    FirmataLite.processInput();    // handle remote commands
 
   switch(STATE){
   case STATE_STARTED:
@@ -341,11 +311,10 @@ void loop() {
       //init_LCD();
       lcd.reset();
       lcd.print("Stn:");
-      lcd.print(stationAddress);
+      lcd.print(system_station_id);
       lcd.setCursor(1,1);
       lcd.print("Card Inserted..");
       flgInsertMessage=false;
-      announce("SD_IN---");
       STATE = STATE_SDINSERTED;
     } 
     else 
@@ -356,10 +325,9 @@ void loop() {
         lcd.reset();
         lcd.clear();
         lcd.print("Stn:");
-        lcd.print(stationAddress);
+        lcd.print(system_station_id);
         lcd.setCursor(2,1);
         lcd.print("Insert Card");
-        announce("SD_OUT--");
         flgInsertMessage = true;
       }
     }
@@ -381,7 +349,7 @@ void loop() {
       lcd.reset();
       lcd.clear();                 // display message on LCD
       lcd.print("Stn:");
-      lcd.print(stationAddress);
+      lcd.print(system_station_id);
       lcd.setCursor(2,1);
       lcd.print("Low Battery"); 
       flgInsertMessage=true;
@@ -397,377 +365,7 @@ void init_LCD(){
   lcd.begin(DOG_LCD_M162, 0x28, DOG_LCD_VCC_3V3);
   lcd.noCursor(); 
 };
-
-/*******************************************************************************/
-/* Initialises the contentents of the eeprom if magic number is incorrect */
-void initialise_eeprom() {   
-  eeprom_write("**", ID);   
-  eeprom_write('C', hwVersion);   
-  eeprom_write(magic_number, magic); 
-} 
-
-/*******************************************************************************/
-//Sends and announce message
-void announce(char theData[9]){
-  Serial.print("aA");
-  Serial.print(stationAddress);
-  Serial.print(theData);
-}
-
-/*******************************************************************************/
-//Sends Response
-void response(char theData[9]){
-  Serial.print("aR");
-  Serial.print(stationAddress);
-  Serial.print(theData);
-}
-/*******************************************************************************/
-/*
- * txHandler(aCommand, theData)
- *  handles the transmition of packet
- */
-void txHandler(char aCommand, char theData[9]){
-
-  switch(aCommand){
-  case 'A':             // Send Announcement
-    Serial.print("aA");
-    break;
-
-  case 'R':            // Send Reply
-    Serial.print("aR");
-    break;
-  } // switch END
-
-  Serial.print(stationAddress);
-  Serial.print(theData);
-}
-
-/*******************************************************************************/
-/*
- * Establishes contact with host computer
- * Sends an announce message x times or until it receives a response
- */
-void establishContact()
-{
-  while(Serial.available() <= 0 && announceCount > 0)
-  {
-    txHandler('A', "STARTED-");   // send announce message
-    delay(250);
-    announceCount--;
-  } 
-}
-
-/*******************************************************************************/
-/*
- * SerialParser
- *    Parses serial data to retreive commands
- */
-void SerialParser(){
-  if (Serial.available()){
-    start_time = millis();                    // set start time
-
-    if (Serial.available() == 12) {     
-      // read the incoming byte:
-      pkt_start = Serial.read();       // start byte (1 Octet)
-
-      CmdHandlerChar = Serial.read();  // command  (1 Octet)
-
-      pkt_addr[0] = Serial.read();     // station address should be this one (2 Octets)
-      pkt_addr[1] = Serial.read();
-
-      pkt_data[0] = Serial.read();     // packet data (8 Octets)
-      pkt_data[1] = Serial.read();
-      pkt_data[2] = Serial.read();
-      pkt_data[3] = Serial.read();
-      pkt_data[4] = Serial.read();
-      pkt_data[5] = Serial.read();
-      pkt_data[6] = Serial.read();
-      pkt_data[7] = Serial.read();
-
-      CallHandler();                    // handle the packet
-    } // IF END
-    else if((millis() - start_time) > 100)   // 100msec timeout
-    {
-      Serial.flush();                     // timed out so flush any characters already received
-    } // ELSE IF END
-  } // if END
-
-} // SerialParser
-
-/*******************************************************************************/
-/*
-  * void CallHandler(void)
- *
- *  handles incoming serial data commands
- */
-void CallHandler(void)
-{
-  switch(CmdHandlerChar) {
-  case 'A':            // Announce              
-    AnnounceHandler();              //no address checking as we should receive all announcements
-    break;
-  case 'C':            // Command
-    if (strcmp(stationAddress, pkt_addr) == 0)  // check that address match
-      CommandHandler();
-    break;
-  case 'R':            // Reply
-    if (strcmp(stationAddress, pkt_addr) == 0)  // check that address match
-      ReplyHandler();
-    break;      
-  } // switch END
-}
-
-/*******************************************************************************/
-void CommandHandler(void){ 
-  char c = pkt_data[0];  // Get the command
-  switch(c){
-  case 'I':            // Station ID
-    CmdID(pkt_data);
-    break;
-  case 'B':            // Battery Status
-    Serial.println("Battery");
-    break;
-  case 'T':            // Time
-    CmdTime(pkt_data);
-    break;        
-  case 'D':            // Get/Set Date
-    CmdDate(pkt_data);
-    break;
-  case 'R':            // RFID
-    CmdRFID(pkt_data);
-    break;
-  case 'S':            // Status
-    Serial.println("Status");
-    break;
-  case 'V':            // Version Hardware and Software
-    CmdGetVersion();
-    break;
-  case 'X':            // Factory Reset
-    CmdFactoryReset();
-    break;
-  } // switch END
-}
-
-/*******************************************************************************/
-/*
-  * void AnnounceHandler()
- *  Handles Announcements received
- */
-void AnnounceHandler(void){
-  Serial.println("Announce Received");
-}
-
-/*******************************************************************************/
-/*
-  * void ReplyHandler()
- *  Handles Replies received
- */
-void ReplyHandler(void){
-  Serial.println("Reply Received");
-}
-
-/*******************************************************************************/
-/*
- * CmdID
- *   This function Sets the StationID
- *   EEPROM is updated with station ID
- *   Reboots the device once Address is Changed
- */
-void CmdID(char theData[8]){
-  char oldAddress[3];
-  eeprom_read(oldAddress, ID);        // get the old StationAddress
-
-  if(strncmp(theData, "I--", 3)==0) {
-    response("I-------");          //No address data so just reply with current StationID
-    // Serial.println("get Address request");
-  } 
-  else {
-
-    eeprom_write(theData[1], ID[0]);  // Write new StationID to NVM
-    eeprom_write(theData[2], ID[1]);
-
-    stationAddress[0] = theData[1];   //change to new ID and reply
-    stationAddress[1] = theData[2];
-
-    Serial.print("aR");               // send address change response old + new address
-    Serial.print(oldAddress);
-    Serial.print("I");
-    Serial.print(stationAddress);
-    Serial.print("-----");
-    delay(100);                        //delay before reboot to send all data                        
-    resetFunc();                       // perform soft reboot
-  }       
-}
-
-
-/*******************************************************************************/
-/*
- * Controls the RFID module
- */
-void CmdRFID(char theData[8]){
-  if(strncmp(theData, "RON", 3)==0) {  // Turn On RFID
-    rfidOn();
-    response("RON-----");
-  } 
-  else {                               // Turn Off RFID
-    rfidOff();
-    response("ROFF----");
-  }
-}
-
-/*******************************************************************************/
-/*
- * Resets the device back to factory settings and reboots
- */
-void CmdFactoryReset(){
-
-  initialise_eeprom();              // initialise eeprom to defaults
-
-  response("X-------");             // Send Response
-  delay(100);                       // delay to send all data before reboot
-  resetFunc();                      // perform reboot
-}
-
-/*******************************************************************************/
-void CmdGetVersion(){
-  char hwversion;
-  eeprom_read(hwversion, hwVersion);
-
-  Serial.print("aR");              // Send revision response
-  Serial.print(stationAddress);
-  Serial.print("VREV");
-  Serial.print(hwversion);
-  Serial.print("---");
-}
-
-/*******************************************************************************/
-// Set/Get Date from RTC
-void CmdDate(char theData[9]){
-  char dateStr[9];
-  i2c_rtc_m41t00s::time_t newtime;
-
-  if(strncmp(theData, "D--", 3)==0) {                // just return Date only (no set)
-    Serial.print("aR");
-    Serial.print(stationAddress);
-    Serial.print("D");
-    Serial.print(itoa(rtc.time.year,dateStr,10));
-    Serial.print(itoa(rtc.time.month,dateStr,10));
-    Serial.print(itoa(rtc.time.day,dateStr,10));
-    Serial.print("-");
-
-  }//if
-  else {                                            // Set the Date using the packet date
-    newtime.year = 10 * (theData[1] - '0') + (theData[2] - '0');
-    newtime.month = 10 * (theData[3] - '0') + (theData[4] - '0');
-    newtime.day = 10 * (theData[5] - '0') + (theData[6] - '0');
-    newtime.hour = rtc.time.hour;                  // use current time on RTC as we are only setting the date
-    newtime.min = rtc.time.min;
-    newtime.sec = rtc.time.sec;
-    rtc.set(&newtime);
-    response(theData);
-  }//else
-
-}
-
-
-/*******************************************************************************/
-/**
- * cmdTime
- *  @param theData  incoming packet data
- *
- *  Reads the incoming data packet and uses this information to set the RTC
- *  a reply is sent confirming that the Time was changed
- * 
- *  If an empty data packet is sent then it's handled as a get time and the 
- *  current time is sent in the response packet
- */
-void CmdTime(char theData[9]){
-  char timeStr[9];
-  i2c_rtc_m41t00s::time_t newtime;
-  // uint8_t u8Status = rtc.get();
-
-  if(strncmp(theData, "T--", 3)==0) {  // just return Time do not set 
-    Serial.print("aR");
-    Serial.print(stationAddress);
-    Serial.print("T");
-    Serial.print(itoa(rtc.time.hour,timeStr,10));
-    Serial.print(itoa(rtc.time.min,timeStr,10));
-    Serial.print(itoa(rtc.time.sec,timeStr,10));
-    Serial.print("-");
-  } //if
-  else {                                //set the time
-    newtime.year = rtc.time.year;       // as we are just setting time we set the date to the current date.
-    newtime.month = rtc.time.month;
-    newtime.day = rtc.time.day;
-    newtime.hour = 10 * (theData[1] - '0') + (theData[2] - '0');
-    newtime.min = 10 * (theData[3] - '0') + (theData[4] - '0');
-    newtime.sec = 10 * (theData[5] - '0') + (theData[6] - '0');
-    rtc.set(&newtime);
-    response(theData);      
-  }//else  
-
-}
-
-/*******************************************************************************/
-/**
- *  announceDateTime
- *   Send two announce packets Date/Time
- *   aA**DYYMMDD-
- *   aA**THHMMSS-
- */
-void announceDateTime(){
-  char tempStr[9];
-  uint8_t u8Status = rtc.get();
-
-  Serial.print("aA");
-  Serial.print(stationAddress);
-  Serial.print("D");
-  if(rtc.time.year < 10 )
-    Serial.print("0");
-  if(rtc.time.year == 0 )
-    Serial.print("0");    
-  else
-    Serial.print(itoa(rtc.time.year,tempStr,10));
-
-  if(rtc.time.month < 10 )
-    Serial.print("0");
-  if(rtc.time.month == 0 )
-    Serial.print("0");
-  Serial.print(itoa(rtc.time.month,tempStr,10));
-
-  if(rtc.time.day < 10 )
-    Serial.print("0");
-  if(rtc.time.day == 0 )
-    Serial.print("0");
-  Serial.print(itoa(rtc.time.day,tempStr,10));
-  Serial.print("-");
-
-  Serial.print("aA");
-  Serial.print(stationAddress);
-  Serial.print("T");
-  if(rtc.time.hour < 10 )
-    Serial.print("0");
-  if(rtc.time.hour == 0 )
-    Serial.print("0");
-  else
-    Serial.print(itoa(rtc.time.hour,tempStr,10));
-
-  if(rtc.time.min < 10 )
-    Serial.print("0");    
-  if(rtc.time.min == 0 )
-    Serial.print("0");
-  else
-    Serial.print(itoa(rtc.time.min,tempStr,10));
-
-  if(rtc.time.sec < 10 )
-    Serial.print("0");
-  if(rtc.time.sec == 0 )
-    Serial.print("0");
-  else
-    Serial.print(itoa(rtc.time.sec,tempStr,10));
-  Serial.print("-");
-
-}
+ 
 
 /*******************************************************************************/
 /**
@@ -775,7 +373,6 @@ void announceDateTime(){
  *   This is called each time a low battery condition is detected
  */
 void lowBatteryCallback(){
-  announce("LOW_BAT-");        // Send announce via serial port
   STATE=STATE_BATLOW;
 }
 
@@ -795,11 +392,9 @@ void onMiddleClick(DebounceButton* btn) {
   switch(STATE){
   case STATE_IDLE:
     rfidOn();
-    announce("RFID_ON-");
     break;
   case STATE_RFIDON:
     rfidOff();
-    announce("RFID_OFF");
     break;
   } //switch
 }
@@ -815,21 +410,19 @@ void onMiddleHold(DebounceButton* btn){
     lcd.reset();
     lcd.clear();
     lcd.print("Stn:");
-    lcd.print(stationAddress);
+    lcd.print(system_station_id);
     lcd.setCursor(0,1);
     lcd.print("Powering Down..."); 
 
     //Turn off RFID  
     digitalWrite(RFID_EN, LOW);  // turn off
     digitalWrite(nLED_RED,HIGH);
-    announce("RFID_OFF");
 
     delay(2000);                // display message before shutdown
     // turn of all peripherals
     digitalWrite(nLCD_BL,HIGH);  // LCD Backlight Off
 
     lcd.noDisplay();            // LCD Off
-    announce("SLEEPING");
     STATE=STATE_SLEEPING;
     delay(50);
     sleepNow();                 // goto sleep
@@ -837,15 +430,14 @@ void onMiddleHold(DebounceButton* btn){
     // Returns here after wakeup
     STATE=STATE_IDLE;
     delay(100);
-    announce("AWAKE---");
-
+ 
     lcd.display();              // LCD On
     //init_LCD();
     lcd.reset();
     lcd.clear();
 
     lcd.print("Stn:");
-    lcd.print(stationAddress);
+    lcd.print(system_station_id);
 
     lcd.setCursor(5,1);
     lcd.print("Ready"); 
@@ -872,13 +464,13 @@ void updateCurrentRfidTag(byte *tagNew)
     //lcd.begin(DOG_LCD_M162,0x28, DOG_LCD_VCC_3V3);
     lcd.clear(); 
     lcd.print("Stn:");
-    lcd.print(stationAddress);
+    lcd.print(system_station_id);
     lcd.setCursor(0,1);  
     lcd.print("ID:");
     // STX
     //lcd.print(0x02, BYTE);
     Serial.print("aA");            // Send Announce of received RFID TAG
-    Serial.print(stationAddress);
+    Serial.print(system_station_id);
     Serial.print("R");
     for (i=0; i<5; i++) 
     {
@@ -1026,9 +618,6 @@ void lcdPrintTime()
     sprintf(dateString, "%02u:%02u:%02u",
     rtc.time.hour,rtc.time.min, rtc.time.sec);
     lcd.print(dateString);
-    //lcd.print(rtc.time.hour);
-    //lcd.print(rtc.time.min);
-    //lcd.print(rtc.time.sec);
   }
   else
   {
@@ -1051,9 +640,7 @@ void lcdPrintTime()
 int writeCsvRecord()
 {
   
-  //digitalWrite(nLCD_CS, HIGH);        //off
-  //digitalWrite(nSD_CS, LOW);        //on
-  
+ 
   // initialize the SD card at SPI_HALF_SPEED to avoid bus errors with
   // breadboards.  use SPI_FULL_SPEED for better performance.
   card.init(SPI_HALF_SPEED);
@@ -1065,11 +652,10 @@ int writeCsvRecord()
   root.openRoot(&volume);
 
   // create a new file
-  char name[] = "LOGSTN00.CSV";        // default file name if station ID is not set
-  if(stationAddress[0] != '*'){        // check we are not at default address of ** as these char should not be in a DOS file name 
-    name[6] = stationAddress[0];
-    name[7] = stationAddress[1];
-  }
+  String fileName = 'LOGSTN' + system_station_id + '.CSV';            
+  char name[12];
+  fileName.toCharArray(name,12);
+ 
   file.open(&root, name, O_CREAT | O_APPEND | O_WRITE);  // create a new file if not exist, else append to existing.
 
   //field
@@ -1078,7 +664,7 @@ int writeCsvRecord()
   //    file.sync();                           // Flush file record to SDFat
   uint8_t u8Status = rtc.get();        // get the current time and update time structures
   byte i = 0;
-  file.print(stationAddress);          // Station ID
+  file.print(system_station_id);          // Station ID
   file.print(",");             
   for (i=0; i<5; i++)                  // RFID TAG ID
   {
@@ -1117,9 +703,6 @@ int writeCsvRecord()
   file.sync();                           // Flush file record to SDFat
   file.close();
   return 0;
-  
-  //digitalWrite(nSD_CS, HIGH);        //off
-  //digitalWrite(nLCD_CS, HIGH);        //off
   
 }
 
@@ -1259,7 +842,7 @@ void rfidOn(){
   lcd.reset();
   lcd.clear();
   lcd.print("Stn:");
-  lcd.print(stationAddress);
+  lcd.print(system_station_id);
   lcd.setCursor(0,1);
   lcd.print("Swipe Next Card.");
   STATE=STATE_RFIDON;
@@ -1275,7 +858,7 @@ void rfidOff(){
   lcd.reset();
   lcd.clear();
   lcd.print("Stn:");
-  lcd.print(stationAddress);
+  lcd.print(system_station_id);
   lcd.setCursor(5,1);
   lcd.print("Ready");
   STATE=STATE_IDLE;
