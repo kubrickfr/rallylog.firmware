@@ -199,6 +199,7 @@ void setup() {
   
   //init_LCD();
   lcd.begin(DOG_LCD_M162,0x28, DOG_LCD_VCC_3V3);
+  lcd.noCursor();
   lcd.print("Stn:");
   lcd.print(byteToint(system_station_id));
   lcd.setCursor(1,1);
