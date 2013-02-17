@@ -129,9 +129,9 @@ void error_P(const char* str) {
   SerialPrintln_P(str);
   if (card.errorCode()) {
     PgmPrint("SD error: ");
-    Serial.print(card.errorCode(), HEX);
-    Serial.print(',');
-    Serial.println(card.errorData(), HEX);
+    //Serial.print(card.errorCode(), HEX);
+    //Serial.print(',');
+    //Serial.println(card.errorData(), HEX);
   }
   while(1);
 }
@@ -472,17 +472,17 @@ void updateCurrentRfidTag(byte *tagNew)
     lcd.print("ID:");
     // STX
     //lcd.print(0x02, BYTE);
-    Serial.print("aA");            // Send Announce of received RFID TAG
-    Serial.print(byteToint(system_station_id));
-    Serial.print("R");
+    //Serial.print("aA");            // Send Announce of received RFID TAG
+    //Serial.print(byteToint(system_station_id));
+    //Serial.print("R");
     for (i=0; i<5; i++) 
     {
       if (rfidTagCurrent[i] < 16) {
         lcd.print("0");
-        Serial.print("0");
+        //Serial.print("0");
       }
       lcd.print(rfidTagCurrent[i], HEX);
-      Serial.print(rfidTagCurrent[i], HEX);
+      //Serial.print(rfidTagCurrent[i], HEX);
     }
     Serial.print("-");  // close off packet
     lcdPrintTime();            // display time on LCD
@@ -655,9 +655,10 @@ int writeCsvRecord()
   root.openRoot(&volume);
 
   // create a new file
-  String fileName = 'LOGSTN' + byteToint(system_station_id) + '.CSV';            
-  char name[12];
-  fileName.toCharArray(name,12);
+  //char StnID[2];
+  //String fileName = 'LOGSTN' + int(system_station_id) + '.CSV';            
+  char name[] = "LOGSTN.CSV";
+  //fileName.toCharArray(name,sizeof(fileName));
  
   file.open(&root, name, O_CREAT | O_APPEND | O_WRITE);  // create a new file if not exist, else append to existing.
 
