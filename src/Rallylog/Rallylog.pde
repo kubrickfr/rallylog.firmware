@@ -22,7 +22,7 @@
 #include <avr/wdt.h>
 #include <avr/power.h>
 #include "Battery.h"
-#include <Firmatalite.h>
+#include "Firmatalite.h"
 
 //
 //  Station ID
@@ -129,9 +129,6 @@ void error_P(const char* str) {
   SerialPrintln_P(str);
   if (card.errorCode()) {
     PgmPrint("SD error: ");
-    //Serial.print(card.errorCode(), HEX);
-    //Serial.print(',');
-    //Serial.println(card.errorData(), HEX);
   }
   while(1);
 }
@@ -152,8 +149,7 @@ void setup() {
   STATE = STATE_STARTING;
 
   config_init();                    // read in config from EEPROM
-  //system_station_id = 1;
-
+  
   //LEDS
   pinMode(nLED_RED,OUTPUT);
   digitalWrite(nLED_RED,HIGH);       //off
@@ -196,7 +192,9 @@ void setup() {
   lcd.begin(DOG_LCD_M162,0x28, DOG_LCD_VCC_3V3);
   lcd.noCursor();
   lcd.print("Stn:");
-  lcd.print(byteToint(system_station_id));
+  
+  lcd.print(String(system_station_id, DEC));
+  
   lcd.setCursor(1,1);
   lcd.print("Rallylog v");
   lcd.print(CODE_MAJOR_VERSION);
@@ -246,10 +244,8 @@ void loop() {
         if (STATE == STATE_IDLE)    // display time on the LCD when idle
           lcdPrintTime();
           if(FirmataLite.available()) 
-           {
              FirmataLite.processInput();
-             remote_broadcast_rtc();
-           }
+          remote_broadcast_rtc();
       }//else
     }//else
   } // sectimer  
@@ -266,9 +262,7 @@ void loop() {
   DebounceButton::updateAll();      // update buttons
   
   if(FirmataLite.available()) 
-   {
      FirmataLite.processInput();    // handle remote commands
-   }
    
   switch(STATE){
   case STATE_STARTED:
@@ -314,7 +308,7 @@ void loop() {
       //init_LCD();
       lcd.reset();
       lcd.print("Stn:");
-      lcd.print(byteToint(system_station_id));
+      lcd.print(String(system_station_id,DEC));
       lcd.setCursor(1,1);
       lcd.print("Card Inserted..");
       flgInsertMessage=false;
@@ -328,7 +322,7 @@ void loop() {
         lcd.reset();
         lcd.clear();
         lcd.print("Stn:");
-        lcd.print(byteToint(system_station_id));
+        lcd.print(String(system_station_id, DEC));
         lcd.setCursor(2,1);
         lcd.print("Insert Card");
         flgInsertMessage = true;
@@ -352,7 +346,7 @@ void loop() {
       lcd.reset();
       lcd.clear();                 // display message on LCD
       lcd.print("Stn:");
-      lcd.print(byteToint(system_station_id));
+      lcd.print(String(system_station_id, DEC));
       lcd.setCursor(2,1);
       lcd.print("Low Battery"); 
       flgInsertMessage=true;
@@ -413,7 +407,7 @@ void onMiddleHold(DebounceButton* btn){
     lcd.reset();
     lcd.clear();
     lcd.print("Stn:");
-    lcd.print(byteToint(system_station_id));
+    lcd.print(String(system_station_id, DEC));
     lcd.setCursor(0,1);
     lcd.print("Powering Down..."); 
 
@@ -440,7 +434,7 @@ void onMiddleHold(DebounceButton* btn){
     lcd.noCursor();
 
     lcd.print("Stn:");
-    lcd.print(byteToint(system_station_id));
+    lcd.print(String(system_station_id, DEC));
 
     lcd.setCursor(5,1);
     lcd.print("Ready"); 
@@ -467,7 +461,7 @@ void updateCurrentRfidTag(byte *tagNew)
     lcd.noCursor();
     lcd.clear(); 
     lcd.print("Stn:");
-    lcd.print(byteToint(system_station_id));
+    lcd.print(String(system_station_id, DEC));
     lcd.setCursor(0,1);  
     lcd.print("ID:");
     // STX
@@ -651,9 +645,9 @@ int writeCsvRecord()
   if (system_station_id == 0)
    StnID = "00";
   else if (system_station_id < 10)
-   StnID = "0" + String(system_station_id);
+   StnID = "0" + String(system_station_id, DEC);
   else
-   StnID = String(system_station_id); 
+   StnID = String(system_station_id, DEC); 
     
   String fileName = "LOGSTN" + StnID + ".CSV";            
   char name[fileName.length()+1];
@@ -667,7 +661,7 @@ int writeCsvRecord()
   //    file.sync();                           // Flush file record to SDFat
   uint8_t u8Status = rtc.get();        // get the current time and update time structures
   byte i = 0;
-  file.print(byteToint(system_station_id));          // Station ID
+  file.print(String(system_station_id, DEC));          // Station ID
   file.print(",");             
   for (i=0; i<5; i++)                  // RFID TAG ID
   {
@@ -845,7 +839,7 @@ void rfidOn(){
   lcd.noCursor();
   lcd.clear();
   lcd.print("Stn:");
-  lcd.print(byteToint(system_station_id));
+  lcd.print(String(system_station_id, DEC));
   lcd.setCursor(0,1);
   lcd.print("Swipe Next Card.");
   STATE=STATE_RFIDON;
@@ -862,7 +856,7 @@ void rfidOff(){
   lcd.noCursor();
   lcd.clear();
   lcd.print("Stn:");
-  lcd.print(byteToint(system_station_id));
+  lcd.print(String(system_station_id, DEC));
   lcd.setCursor(5,1);
   lcd.print("Ready");
   STATE=STATE_IDLE;
