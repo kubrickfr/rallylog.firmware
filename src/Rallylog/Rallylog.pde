@@ -656,9 +656,18 @@ int writeCsvRecord()
   root.openRoot(&volume);
 
   // create a new file
-  //char StnID[2];
-  //String fileName = 'LOGSTN' + int(system_station_id) + '.CSV';            
-  char name[] = "LOGSTN.CSV";
+  String StnID;
+  
+  if (system_station_id == 0)
+   StnID = "00";
+  else if (system_station_id < 10)
+   StnID = "0" + String(system_station_id);
+  else
+   StnID = String(system_station_id); 
+    
+  String fileName = "LOGSTN" + StnID + ".CSV";            
+  char name[fileName.length()+1];
+  fileName.toCharArray(name,fileName.length()+1);
   //fileName.toCharArray(name,sizeof(fileName));
  
   file.open(&root, name, O_CREAT | O_APPEND | O_WRITE);  // create a new file if not exist, else append to existing.

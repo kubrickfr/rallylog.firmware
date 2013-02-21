@@ -93,7 +93,7 @@ void remote_report_rtc(){
   byte response[11] = {
       system_station_id,            // station ID
       voltage/256,                  // battery
-      voltage%254.
+      voltage%254,
       rtc.time.sec,                 // RTC
       rtc.time.min,  
       rtc.time.hour,  
