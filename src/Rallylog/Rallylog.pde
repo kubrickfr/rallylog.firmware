@@ -22,7 +22,7 @@
 #include <avr/wdt.h>
 #include <avr/power.h>
 #include "Battery.h"
-#include "Firmatalite.h"
+#include <Firmatalite.h>
 
 //
 //  Station ID
@@ -192,12 +192,7 @@ void setup() {
   pinMode(nSD_CARD_IN, INPUT);      // Configure Card Detect Input
   digitalWrite(nSD_CARD_IN, HIGH);  // enable pullup;
   file.dateTimeCallback(sdDateTimeCallback);    // callback to get time/date for file timestamp
-  //Serial.begin(9600);               // opens serial port, sets data rate to 9600 bps
 
-  delay(500);
-
-  
-  //init_LCD();
   lcd.begin(DOG_LCD_M162,0x28, DOG_LCD_VCC_3V3);
   lcd.noCursor();
   lcd.print("Stn:");
@@ -250,9 +245,11 @@ void loop() {
       else {
         if (STATE == STATE_IDLE)    // display time on the LCD when idle
           lcdPrintTime();
-          if(FirmataLite.available()) FirmataLite.processInput();
-            remote_broadcast_rtc();
-        
+          if(FirmataLite.available()) 
+           {
+             FirmataLite.processInput();
+             remote_broadcast_rtc();
+           }
       }//else
     }//else
   } // sectimer  
@@ -269,8 +266,10 @@ void loop() {
   DebounceButton::updateAll();      // update buttons
   
   if(FirmataLite.available()) 
-    FirmataLite.processInput();    // handle remote commands
-
+   {
+     FirmataLite.processInput();    // handle remote commands
+   }
+   
   switch(STATE){
   case STATE_STARTED:
     // set up the LCD type and the contrast setting for the display 
@@ -436,9 +435,9 @@ void onMiddleHold(DebounceButton* btn){
     delay(100);
  
     lcd.display();              // LCD On
-    //init_LCD();
     lcd.reset();
     lcd.clear();
+    lcd.noCursor();
 
     lcd.print("Stn:");
     lcd.print(byteToint(system_station_id));
@@ -465,27 +464,20 @@ void updateCurrentRfidTag(byte *tagNew)
     byte i = 0;
     //init_LCD();
     lcd.reset();
-    //lcd.begin(DOG_LCD_M162,0x28, DOG_LCD_VCC_3V3);
+    lcd.noCursor();
     lcd.clear(); 
     lcd.print("Stn:");
     lcd.print(byteToint(system_station_id));
     lcd.setCursor(0,1);  
     lcd.print("ID:");
     // STX
-    //lcd.print(0x02, BYTE);
-    //Serial.print("aA");            // Send Announce of received RFID TAG
-    //Serial.print(byteToint(system_station_id));
-    //Serial.print("R");
     for (i=0; i<5; i++) 
     {
       if (rfidTagCurrent[i] < 16) {
         lcd.print("0");
-        //Serial.print("0");
-      }
+       }
       lcd.print(rfidTagCurrent[i], HEX);
-      //Serial.print(rfidTagCurrent[i], HEX);
     }
-    Serial.print("-");  // close off packet
     lcdPrintTime();            // display time on LCD
 
     if(writeCsvRecord()<0) // Write CSV Record to SD Card
@@ -643,8 +635,6 @@ void lcdPrintTime()
  */
 int writeCsvRecord()
 {
-  
- 
   // initialize the SD card at SPI_HALF_SPEED to avoid bus errors with
   // breadboards.  use SPI_FULL_SPEED for better performance.
   card.init(SPI_HALF_SPEED);
@@ -668,8 +658,7 @@ int writeCsvRecord()
   String fileName = "LOGSTN" + StnID + ".CSV";            
   char name[fileName.length()+1];
   fileName.toCharArray(name,fileName.length()+1);
-  //fileName.toCharArray(name,sizeof(fileName));
- 
+   
   file.open(&root, name, O_CREAT | O_APPEND | O_WRITE);  // create a new file if not exist, else append to existing.
 
   //field
@@ -686,7 +675,6 @@ int writeCsvRecord()
     file.print(rfidTagCurrent[i], HEX);
   }
   file.print(",");             
-  //filePrintTime();
   file.print("20");                     // TimeStamp as yyyy-mm-dd hh:mm:ss
   if(rtc.time.year <10)
     file.print("0");
@@ -852,8 +840,9 @@ void rfidOn(){
   digitalWrite(RFID_EN, HIGH);  // turn on
   digitalWrite(nLED_RED,LOW);
   digitalWrite(nLCD_BL,LOW);    //LCD Backlight On
-  //init_LCD();
+
   lcd.reset();
+  lcd.noCursor();
   lcd.clear();
   lcd.print("Stn:");
   lcd.print(byteToint(system_station_id));
@@ -870,6 +859,7 @@ void rfidOff(){
   digitalWrite(nLCD_BL,HIGH);   // LCD Backlight Off
   //init_LCD();
   lcd.reset();
+  lcd.noCursor();
   lcd.clear();
   lcd.print("Stn:");
   lcd.print(byteToint(system_station_id));

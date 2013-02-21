@@ -45,10 +45,8 @@
 
 // On sysex message from host
 void sysexCallback(byte command, byte argc, byte*argv)
-{
-    
-    switch(command){
-        
+{ 
+    switch(command){        
        case REMOTE_CMD_ID_REQUEST            : remote_report_id(); break;
        case REMOTE_CMD_ID_SET                : remote_set_id(argc, argv); break; 
        case REMOTE_CMD_BAT_REQUEST           : remote_report_bat(); break;
