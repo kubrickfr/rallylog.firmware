@@ -114,7 +114,7 @@ void remote_set_rtc(byte argc, byte *argv){
   newtime.day = argv[PARM_RTC_DAY];
   newtime.month = argv[PARM_RTC_MTH];
   newtime.year = argv[PARM_RTC_YEAR];
-  newtime.cal = argv[PARM_RTC_CAL];      // Calibrate
+  //newtime.cal = argv[PARM_RTC_CAL];      // Calibrate
   
   rtc.set(&newtime);                    // Set the RTC
 }
